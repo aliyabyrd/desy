@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Home, FolderKanban, Images, Table2, Ruler, CalendarCheck, Plus, Search, ArrowRight, ArrowLeft, X, Trash2, Upload, Type, StickyNote, MousePointer2, MoveRight, Highlighter, ZoomIn, ZoomOut, Check, Undo2, Redo2, Copy, BringToFront, SendToBack, ImageDown, Grid3X3, CalendarDays, List, Columns3, Download } from 'lucide-react';
+import { Home, FolderKanban, Images, Table2, Ruler, CalendarCheck, Plus, Search, ArrowRight, ArrowLeft, X, Trash2, Upload, Type, StickyNote, MousePointer2, MoveRight, Highlighter, ZoomIn, ZoomOut, Check, Undo2, Redo2, Copy, BringToFront, SendToBack, ImageDown, Grid3X3, CalendarDays, List, Columns3, Download, Hand, Eye, EyeOff, Lock, Unlock, ChevronUp, ChevronDown, Armchair, Flower2, Layers } from 'lucide-react';
 import './styles.css';
 type Area = 'Home' | 'My Projects' | 'Moodboards' | 'Spreadsheets' | 'Layout Studio' | 'Planner';
 type Project = {
@@ -28,6 +28,8 @@ type BoardNode = {
     src?: string;
     fontColor?: string;
     fontSize?: number;
+    hidden?: boolean;
+    locked?: boolean;
 };
 type Edge = {
     id: string;
@@ -68,6 +70,9 @@ type LayoutItem = {
     w?: number;
     h?: number;
     rotation?: number;
+    src?: string;
+    hidden?: boolean;
+    locked?: boolean;
 };
 type LayoutDoc = {
     id: string;
@@ -75,6 +80,7 @@ type LayoutDoc = {
     projectId: string;
     photo?: string;
     background?: string;
+    backgroundColor?: string;
     opacity?: number;
     roomWidth?: number;
     roomHeight?: number;
@@ -148,7 +154,27 @@ function calcCell(raw: string, cells: Record<string, string>, visited: Set<strin
         return e instanceof Error && e.message === 'CYCLE' ? '#CYCLE!' : '#ERROR';
     }
 }
+function WorkspaceHeader({section,name,detail}:{section:string;name:string;detail:string}) {
+ return <div className="desy-workspace-header"><div className="desy-workspace-path"><span className="desy-workspace-mark">✳</span><span>DESY STUDIO</span><span className="desy-path-slash">/</span><span>{section}</span></div><div className="desy-workspace-status"><span className="desy-live-dot"/> Local workspace · Auto-save</div><div className="desy-workspace-heading"><strong>{name}</strong><small>{detail}</small></div></div>;
+}
 // This is the main workspace: it handles navigation and keeps the app data in sync.
+function reorder<T extends {id:string}>(items:T[],id:string,step:number):T[]{const a=[...items],i=a.findIndex(x=>x.id===id),j=i+step;if(i<0||j<0||j>=a.length)return a;[a[i],a[j]]=[a[j],a[i]];return a;}
+async function exportLayoutPNG(doc:LayoutDoc){
+  const width=1400,height=Math.round(1400*(doc.roomHeight||15)/(doc.roomWidth||20));
+  const canvas=document.createElement('canvas');canvas.width=width;canvas.height=height;
+  const ctx=canvas.getContext('2d');if(!ctx)return;
+  ctx.fillStyle=doc.backgroundColor||'#fff';ctx.fillRect(0,0,width,height);
+  const drawImage=async(src:string,x:number,y:number,w:number,h:number,alpha=1)=>{const img=new Image();img.src=src;try{await img.decode();ctx.globalAlpha=alpha;ctx.drawImage(img,x,y,w,h);ctx.globalAlpha=1;}catch{ctx.globalAlpha=1;}};
+  if(doc.background)await drawImage(doc.background,0,0,width,height,doc.opacity??.5);
+  for(const it of doc.items.filter(i=>!i.hidden)){
+    const x=it.x/100*width,y=it.y/100*height,w=(it.w||100)/35/(doc.roomWidth||20)*width,h=(it.h||70)/35/(doc.roomHeight||15)*height;
+    ctx.save();ctx.translate(x,y);ctx.rotate((it.rotation||0)*Math.PI/180);
+    if(it.kind==='Uploaded Image'&&it.src)await drawImage(it.src,-w/2,-h/2,w,h);
+    else{ctx.fillStyle=it.kind.includes('Plant')?'#bad7bf':it.kind.includes('Rug')?'#f2dce7':it.kind.includes('Table')?'#d4bfa9':'#dbe0f5';ctx.strokeStyle='#8c8aaa';ctx.lineWidth=3;ctx.beginPath();if(it.kind.includes('Round')||it.kind==='Plant'||it.kind==='Lamp'){ctx.ellipse(0,0,w/2,h/2,0,0,Math.PI*2);}else{ctx.rect(-w/2,-h/2,w,h);}ctx.fill();ctx.stroke();ctx.fillStyle='#4d4b62';ctx.font='16px Inter, sans-serif';ctx.textAlign='center';ctx.fillText(it.kind,0,4,Math.max(30,w-10));}ctx.restore();
+  }
+  const a=document.createElement('a');a.download=(doc.name||'desy-layout').replace(/[^a-z0-9-_]+/gi,'-')+'.png';a.href=canvas.toDataURL('image/png');a.click();
+}
+function LavenderCursor(){const [pos,setPos]=useState<{x:number;y:number}|null>(null);useEffect(()=>{const move=(e:PointerEvent)=>{if(e.pointerType==='mouse')setPos({x:e.clientX,y:e.clientY});};const leave=()=>setPos(null);window.addEventListener('pointermove',move);document.addEventListener('mouseleave',leave);return()=>{window.removeEventListener('pointermove',move);document.removeEventListener('mouseleave',leave);};},[]);return pos?<div className="desy-custom-cursor" aria-hidden="true" style={{left:pos.x,top:pos.y}}><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round"><path d="M12 2v20M2 12h20M4.93 4.93l14.14 14.14M19.07 4.93 4.93 19.07"/></svg></div>:null;}
 export default function App() {
     const [data, setData] = useState<Data>(initial);
     const [area, setArea] = useState<Area>('Home');
@@ -178,7 +204,7 @@ export default function App() {
         Area,
         typeof Home
     ][] = [['Home', Home], ['My Projects', FolderKanban], ['Moodboards', Images], ['Spreadsheets', Table2], ['Layout Studio', Ruler], ['Planner', CalendarCheck]];
-    return <div className="shell">
+    return <><LavenderCursor/><div className="shell">
 <aside className="sidebar">
 <button className="logo" onClick={() => { setProjectId(''); go('Home'); }}>Desy<span>✳</span>
 </button>
@@ -195,40 +221,110 @@ export default function App() {
 <span className="top-badge">YOUR CREATIVE SPACE</span>
 </header>
         {area === 'Home' ? <>
-<div className="hero">
-<div className="eyebrow">WELCOME TO DESY</div>
-<h1>Make room for<br />
-<span>your next big idea.</span>
-</h1>
-<p>One beautiful space for your projects, ideas, and everything in between.</p>
-<button className="primary" onClick={() => setCreateOpen(true)}>
-<Plus size={18}/> Create new project <ArrowRight size={17}/>
-</button>
-</div>
-<div className="section-title">
-<div>
-<span className="eyebrow">YOUR COLLECTION</span>
-<h2>My Projects <small>{data.projects.length}</small>
-</h2>
-</div>
-<button className="text-btn" onClick={() => go('My Projects')}>View all <ArrowRight size={17}/>
-</button>
-</div>
-<ProjectGrid projects={data.projects.slice(0, 6)} open={p => { setProjectId(p.id); go('My Projects'); }} remove={deleteProject} create={() => setCreateOpen(true)} update={update}/>
-<div className="section-title tools-heading">
-<div>
-<span className="eyebrow">YOUR CREATIVE TOOLKIT</span>
-<h2>Everything in one place.</h2>
-</div>
-</div>
-<div className="tool-grid">{nav.slice(2).map(([name, Icon], i) => <button className="tool-card" key={name} onClick={() => go(name)}>
-<span className="tool-icon" style={{ background: pastel[i] }}>
-<Icon size={23}/>
-</span>
-<strong>{name}</strong>
-<small>{['An open canvas for your ideas', 'Colorful sheets for every plan', 'Visualize and arrange your space', 'Keep your plans moving'][i]}</small>
-<ArrowRight size={18}/>
-</button>)}</div></> : area === 'My Projects' ? <>
+<section className="studio-hero">
+  <div className="studio-hero-copy">
+    <div className="eyebrow">WELCOME TO DESY</div>
+    <h1>Make room for<br/><span>your next big idea.</span></h1>
+    <p>One beautiful space for your projects, ideas, and everything in between.</p>
+    <div className="studio-hero-actions">
+      <button className="primary" onClick={() => setCreateOpen(true)}><Plus size={18}/> Create new project</button>
+      <button className="outline" onClick={() => go('Moodboards')}>Explore tools <ArrowRight size={17}/></button>
+    </div>
+  </div>
+  <div className="desy-motion" role="img" aria-label="Animated preview of Desy Layout Studio: a table is placed on a floor plan, alignment guides appear, and the layers and properties panels update">
+    <div className="motion-window">
+      <div className="motion-topbar">
+        <div className="motion-dots"><i/><i/><i/></div>
+        <span className="motion-breadcrumb">DESY <b>/</b> LAYOUT STUDIO</span>
+        <span className="motion-top-action"><span className="motion-online"/> Auto-saved</span>
+      </div>
+      <div className="motion-workspace">
+        <aside className="motion-elements">
+          <span className="motion-panel-label">ELEMENTS</span>
+          <div className="motion-element"><Armchair size={14}/> Seating</div>
+          <div className="motion-element motion-element-selected"><Table2 size={14}/> Tables <Plus size={12}/></div>
+          <div className="motion-element"><Flower2 size={14}/> Decor</div>
+          <div className="motion-mini-swatches"><i/><i/><i/></div>
+        </aside>
+        <div className="motion-canvas-shell">
+          <div className="motion-canvas">
+            <span className="motion-canvas-label">THE DINNER PARTY</span>
+            <div className="motion-rug"/>
+            <div className="motion-sofa"><span/></div>
+            <div className="motion-chair motion-chair-one"/>
+            <div className="motion-chair motion-chair-two"/>
+            <div className="motion-plant"><span/></div>
+            <div className="motion-guide motion-guide-h"/>
+            <div className="motion-guide motion-guide-v"/>
+            <div className="motion-table-selection">
+              <div className="motion-table"><span/></div>
+              <i className="motion-handle tl"/><i className="motion-handle tr"/><i className="motion-handle bl"/><i className="motion-handle br"/>
+            </div>
+            <svg className="motion-pointer" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2v20M2 12h20M4.93 4.93l14.14 14.14M19.07 4.93 4.93 19.07" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
+          </div>
+          <div className="motion-zoom">− <span>100%</span> +</div>
+        </div>
+        <aside className="motion-inspector">
+          <span className="motion-panel-label">LAYERS</span>
+          <div className="motion-layer motion-layer-active"><Layers size={12}/> Coffee table <Eye size={11}/></div>
+          <div className="motion-layer"><Layers size={12}/> Sofa</div>
+          <div className="motion-layer"><Layers size={12}/> Chairs</div>
+          <div className="motion-panel-rule"/>
+          <span className="motion-panel-label">PROPERTIES</span>
+          <div className="motion-property-title">Coffee table</div>
+          <div className="motion-props"><span>X <b>120</b></span><span>Y <b>80</b></span></div>
+          <div className="motion-props"><span>W <b>160</b></span><span>H <b>90</b></span></div>
+          <div className="motion-fill"><i/> Fill</div>
+        </aside>
+      </div>
+      <div className="motion-bottom"><span><span className="motion-bottom-dot"/> Designing your space</span><span>01 / 03</span></div>
+    </div>
+  </div>
+</section>
+<section className="studio-section">
+  <div className="studio-section-head"><h2>My Projects <small>{data.projects.length}</small></h2><button className="text-btn" onClick={() => go('My Projects')}>View all <ArrowRight size={17}/></button></div>
+  <div className="home-project-grid">
+    {data.projects.slice(0,4).map(p => <button key={p.id} className="home-project-card" onClick={() => { setProjectId(p.id); go('My Projects'); }}>
+      <div className="home-project-mark" style={{backgroundColor:p.coverColor || (p.kind === 'Interior' ? '#e5f0e7' : '#eeebff')}}><span>{p.kind === 'Interior' ? '⌂' : '✳'}</span></div>
+      <span className="home-project-type">{p.kind === 'Interior' ? 'INTERIOR DESIGN' : 'EVENT PLANNING'}</span>
+      <strong>{p.name}</strong>
+      <span className="home-project-meta">{p.type} · {data.boards.filter(b => b.projectId === p.id).length} boards</span>
+      <ArrowRight className="home-project-arrow" size={17}/>
+    </button>)}
+    <button className="home-new-project" onClick={() => setCreateOpen(true)}><span><Plus size={25}/></span><strong>Create new project</strong><small>Start with a blank canvas</small></button>
+  </div>
+</section>
+<section className="studio-section">
+  <div className="studio-section-head"><h2>Creative Tools</h2></div>
+  <div className="home-tools-grid">
+    {([
+      {area:'Moodboards' as Area, title:'Moodboard Studio', subtitle:'Collect, organize, and visualize your ideas.', icon:Images, style:'moodboards'},
+      {area:'Layout Studio' as Area, title:'Layout Studio', subtitle:'Design spaces and event layouts with ease.', icon:Ruler, style:'layouts'},
+      {area:'Spreadsheets' as Area, title:'Spreadsheets', subtitle:'Plan budgets, lists, and project details.', icon:Table2, style:'sheets'},
+      {area:'Planner' as Area, title:'Planner', subtitle:'Keep your timeline, tasks, and ideas on track.', icon:CalendarCheck, style:'planner'}
+    ]).map(tool => <button key={tool.area} className="home-tool-card" onClick={() => go(tool.area)}>
+      <div className={'home-tool-thumbnail '+tool.style}>
+        {tool.style === 'moodboards' ? <><span className="thumb-photo one"/><span className="thumb-photo two"/><span className="thumb-photo three"/><span className="thumb-note">create<br/>something<br/>beautiful.</span></> :
+         tool.style === 'layouts' ? <><span className="mini-rug"/><span className="mini-sofa"/><span className="mini-table"/><span className="mini-chair"/><span className="mini-plant"/></> :
+         tool.style === 'sheets' ? <div className="mini-sheet">{Array.from({length:24},(_,i)=><i key={i}/>)}</div> :
+         <div className="mini-calendar">{Array.from({length:28},(_,i)=><i key={i} className={[8,16,22].includes(i)?'marked':[12,25].includes(i)?'soft-marked':''}>{i+1}</i>)}</div>}
+        <span className="home-tool-icon"><tool.icon size={19}/></span>
+      </div>
+      <div className="home-tool-info"><strong>{tool.title}</strong><span>{tool.subtitle}</span><ArrowRight size={17}/></div>
+    </button>)}
+  </div>
+</section>
+<section className="studio-section recent-section">
+  <div className="studio-section-head"><h2>Recent Activity</h2></div>
+  <div className="home-activity-grid">
+    {data.projects.length === 0 && data.tasks.length === 0 && data.boards.length === 0 ? <div className="activity-empty">Your creative journey starts here. Create a project to see your activity.</div> : <>
+      {data.projects.slice().sort((a,b)=>b.created-a.created).slice(0,3).map(p=><button className="activity-card" key={p.id} onClick={()=>{setProjectId(p.id);go('My Projects');}}><span className="activity-symbol"><FolderKanban size={17}/></span><span><strong>Created {p.name}</strong><small>{new Date(p.created).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})}</small></span><ArrowRight size={15}/></button>)}
+      {data.tasks.slice(0,2).map(t=><button className="activity-card" key={t.id} onClick={()=>go('Planner')}><span className="activity-symbol"><CalendarCheck size={17}/></span><span><strong>{t.status === 'Done'?'Completed':'Task'}: {t.title}</strong><small>{t.status}</small></span><ArrowRight size={15}/></button>)}
+    </>}
+  </div>
+</section>
+</> : area === 'My Projects' ? <>
+<WorkspaceHeader section="PROJECT LIBRARY" name="Your creative projects" detail={`${data.projects.length} projects · One connected workspace`} />
 <div className="page-heading">
 <div>
 <span className="eyebrow">YOUR CREATIVE LIBRARY</span>
@@ -302,7 +398,7 @@ export default function App() {
 </button>
 </div>
 </div>
-</div>}</div>;
+</div>}</div></>;
 }
 // One project brings its boards, spreadsheets, layouts, and tasks together.
 function ProjectOverview({ project, data, open }: {
@@ -458,6 +554,7 @@ function Moodboards({ data, update, projectId, boardId, setBoardId }: {
         y?: number;
     }>({});
     const [previewSaved, setPreviewSaved] = useState(false);
+    const [layersOpen, setLayersOpen] = useState(true);
     // Opening another board should show the regular Save Preview button.
     useEffect(() => setPreviewSaved(false), [boardId]);
     const board = data.boards.find(b => b.id === boardId);
@@ -473,7 +570,7 @@ function Moodboards({ data, update, projectId, boardId, setBoardId }: {
         return; to.push(structuredClone(board)); historyBusy.current = true; update(v => ({ ...v, boards: v.boards.map(b => b.id === boardId ? previous : b) })); historyBusy.current = false; };
     const duplicate = () => { if (!selected || !board)
         return; const n = board.nodes.find(x => x.id === selected); if (!n)
-        return; const copy = { ...n, id: uid(), x: n.x + 24, y: n.y + 24 }; updateBoard(b => ({ ...b, nodes: [...b.nodes, copy] })); setSelected(copy.id); };
+        return; const copy = { ...n, id: uid(), x: n.x + 24, y: n.y + 24, locked: false, hidden: false }; updateBoard(b => ({ ...b, nodes: [...b.nodes, copy] })); setSelected(copy.id); };
     const removeSelected = () => { if (!selected)
         return; updateBoard(b => ({ ...b, nodes: b.nodes.filter(n => n.id !== selected), edges: b.edges.filter(e => e.from !== selected && e.to !== selected) })); setSelected(''); };
     const layer = (front: boolean) => { if (!selected)
@@ -582,6 +679,7 @@ function Moodboards({ data, update, projectId, boardId, setBoardId }: {
     } setGuides({ x: gx, y: gy }); updateBoard(b => ({ ...b, nodes: b.nodes.map(n => n.id === id ? { ...n, x, y } : n) })); };
     const selectedNode = board?.nodes.find(n => n.id === selected);
     return <>
+<WorkspaceHeader section="MOODBOARD STUDIO" name={board?.name || "Your boards"} detail={board ? `${board.nodes.length} layers · Saved locally` : `${data.boards.length} boards in your library`} />
 <PageTitle eyebrow="VISUAL THINKING, UNLIMITED POSSIBILITIES" title="Moodboards" desc="A blank canvas for mind maps, inspiration, notes, and everything you're imagining." action={!board ? <button className="primary" onClick={() => { const b: Board = { id: uid(), name: newName.trim() || 'Untitled board', projectId: attach, nodes: [], edges: [] }; update(v => ({ ...v, boards: [b, ...v.boards] })); setBoardId(b.id); setNewName(''); }}>
 <Plus size={17}/> New moodboard</button> : <button className="outline" onClick={() => { setBoardId(''); setSelected(''); }}>
 <ArrowLeft size={16}/> All moodboards</button>}/>
@@ -590,11 +688,11 @@ function Moodboards({ data, update, projectId, boardId, setBoardId }: {
 <input className="field" placeholder="Name your moodboard (optional)" value={newName} onChange={e => setNewName(e.target.value)}/>
 <ProjectSelect projects={data.projects} value={attach} onChange={setAttach}/>
 </div>
-<div className="library-grid">{data.boards.filter(b => !projectId || b.projectId === projectId).map(b => <button className="library-card" key={b.id} onClick={() => setBoardId(b.id)}>
+<div className="library-grid">{data.boards.filter(b => !projectId || b.projectId === projectId).map(b => <div className="library-card-wrap" key={b.id}><button className="library-card" onClick={() => setBoardId(b.id)}>
 <span className="library-art" style={{ background: b.preview ? `url(${b.preview}) center / cover no-repeat` : (b.background || pastel[b.nodes.length % pastel.length]) }}>{!b.preview && <Images size={32}/>}</span>
 <strong>{b.name}</strong>
 <small>{b.nodes.length} elements</small>
-</button>)}<button className="library-card create-library" onClick={() => { const b: Board = { id: uid(), name: newName.trim() || 'Untitled board', projectId: attach, nodes: [], edges: [] }; update(v => ({ ...v, boards: [b, ...v.boards] })); setBoardId(b.id); }}>
+</button><button className="library-delete" type="button" aria-label={`Delete ${b.name}`} title={`Delete ${b.name}`} onClick={() => { if (window.confirm(`Delete moodboard "${b.name}"? This cannot be undone.`)) { update(v => ({...v,boards:v.boards.filter(item=>item.id!==b.id)})); if(boardId===b.id)setBoardId(''); } }}><X size={16}/></button></div>)}<button className="library-card create-library" onClick={() => { const b: Board = { id: uid(), name: newName.trim() || 'Untitled board', projectId: attach, nodes: [], edges: [] }; update(v => ({ ...v, boards: [b, ...v.boards] })); setBoardId(b.id); }}>
 <Plus size={30}/>
 <strong>Blank moodboard</strong>
 <small>Start with an empty grid</small>
@@ -667,17 +765,18 @@ function Moodboards({ data, update, projectId, boardId, setBoardId }: {
 <button className="icon-btn danger" title="Delete element" onClick={() => { updateBoard(b => ({ ...b, nodes: b.nodes.filter(n => n.id !== selected), edges: b.edges.filter(e => e.from !== selected && e.to !== selected) })); setSelected(''); }}>
 <Trash2 size={17}/>
 </button>
-</div>}<div className="board-viewport">
+</div>}<div className="editor-panel-heading"><strong>Canvas workspace</strong><button className="outline" onClick={() => setLayersOpen(v => !v)}><Columns3 size={15}/> {layersOpen ? 'Hide layers' : 'Show layers'}</button></div>
+<div className={'desy-editor-columns' + (layersOpen ? '' : ' panels-closed')}><div className="desy-editor-main"><div className="board-viewport">
 <div ref={canvas} className="board-canvas" style={{ backgroundColor: board.background || '#fafbff', width: 1600, height: 980, transform: `scale(${zoom})`, transformOrigin: 'top left' }} onPointerMove={move} onPointerUp={() => { dragging.current = null; setGuides({}); }} onPointerCancel={() => { dragging.current = null; setGuides({}); }} onClick={e => { if (e.target === e.currentTarget)
         setSelected(''); }}>{guides.x !== undefined && <div className="board-guide vertical" style={{ left: guides.x }}/>}{guides.y !== undefined && <div className="board-guide horizontal" style={{ top: guides.y }}/>}<svg className="edges" width="1600" height="980">
 <defs>
 <marker id="arrowhead" markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto">
 <polygon points="0 0, 9 3.5, 0 7" fill="#8686b9"/>
 </marker>
-</defs>{board.edges.map(e => { const a = board.nodes.find(n => n.id === e.from), b = board.nodes.find(n => n.id === e.to); return a && b ? <line key={e.id} x1={a.x + a.w / 2} y1={a.y + a.h / 2} x2={b.x + b.w / 2} y2={b.y + b.h / 2} stroke="#8686b9" strokeWidth="2.5" markerEnd="url(#arrowhead)"/> : null; })}</svg>{board.nodes.map(n => <div key={n.id} className={'board-node ' + n.kind + (selected === n.id ? ' selected' : '') + (connectFrom === n.id ? ' connecting' : '')} style={{ left: n.x, top: n.y, width: n.w, height: n.h, background: n.kind === 'image' ? '#fff' : n.color }} onPointerDown={e => startDrag(e, n)} onClick={e => { e.stopPropagation(); pickNode(n.id); }}>{n.kind === 'image' ? <img src={n.src} draggable={false}/> : n.kind === 'highlight' ? <div className="highlight-line"/> : <>
+</defs>{board.edges.map(e => { const a = board.nodes.find(n => n.id === e.from), b = board.nodes.find(n => n.id === e.to); return a && b ? <line key={e.id} x1={a.x + a.w / 2} y1={a.y + a.h / 2} x2={b.x + b.w / 2} y2={b.y + b.h / 2} stroke="#8686b9" strokeWidth="2.5" markerEnd="url(#arrowhead)"/> : null; })}</svg>{board.nodes.filter(n => !n.hidden).map(n => <div key={n.id} className={'board-node ' + n.kind + (selected === n.id ? ' selected' : '') + (connectFrom === n.id ? ' connecting' : '')} style={{ left: n.x, top: n.y, width: n.w, height: n.h, background: n.kind === 'image' ? '#fff' : n.color }} onPointerDown={e => { if (!n.locked) startDrag(e, n); }} onClick={e => { e.stopPropagation(); pickNode(n.id); }}>{n.kind === 'image' ? <img src={n.src} draggable={false}/> : n.kind === 'highlight' ? <div className="highlight-line"/> : <>
 <div className="node-drag-handle" title="Drag to move">⋮⋮ Move</div>
-<textarea style={{ color: n.fontColor || '#24252c', fontSize: n.fontSize || 16 }} spellCheck={false} aria-label="Edit board text" value={n.text} onChange={e => updateBoard(b => ({ ...b, nodes: b.nodes.map(x => x.id === n.id ? { ...x, text: e.target.value } : x) }))} onPointerDown={e => e.stopPropagation()}/></>}</div>)}</div>
-</div>
+<textarea style={{ color: n.fontColor || '#24252c', fontSize: n.fontSize || 16 }} spellCheck={false} aria-label="Edit board text" value={n.text} readOnly={!!n.locked} onChange={e => updateBoard(b => ({ ...b, nodes: b.nodes.map(x => x.id === n.id ? { ...x, text: e.target.value } : x) }))} onPointerDown={e => e.stopPropagation()}/></>}</div>)}</div>
+</div></div>{layersOpen && <div className="desy-layers-panel"><div className="desy-panel-title">Layers <span>{board.nodes.length}</span></div><p className="desy-panel-hint">Top layers appear first. Select, lock, hide, or reorder.</p>{[...board.nodes].reverse().map(n => <div className={'desy-layer-row' + (selected === n.id ? ' active' : '')} key={n.id}><button className="desy-layer-name" onClick={() => setSelected(n.id)} title={n.kind}>{n.kind === 'image' ? '▧' : n.kind === 'text' ? 'T' : '▤'} <span>{n.kind === 'image' ? 'Image' : n.text?.trim().slice(0,20) || n.kind}</span></button><button title={n.hidden ? 'Show layer' : 'Hide layer'} onClick={() => updateBoard(b => ({...b,nodes:b.nodes.map(x => x.id===n.id?{...x,hidden:!x.hidden}:x)}))}>{n.hidden ? '◌' : '◉'}</button><button title={n.locked ? 'Unlock layer' : 'Lock layer'} onClick={() => updateBoard(b => ({...b,nodes:b.nodes.map(x => x.id===n.id?{...x,locked:!x.locked}:x)}))}>{n.locked ? '🔒' : '♧'}</button><button title="Move up" onClick={() => updateBoard(b => ({...b,nodes:reorder(b.nodes,n.id,1)}))}><ChevronUp size={14}/></button><button title="Move down" onClick={() => updateBoard(b => ({...b,nodes:reorder(b.nodes,n.id,-1)}))}><ChevronDown size={14}/></button></div>)}{selectedNode && <div className="desy-properties"><div className="desy-panel-title">Properties</div>{(['x','y','w','h'] as const).map(prop => <label key={prop}>{prop.toUpperCase()}<input type="number" value={Math.round(selectedNode[prop])} onChange={e => updateBoard(b => ({...b,nodes:b.nodes.map(n => n.id===selected?{...n,[prop]:Number(e.target.value)}:n)}))}/></label>)}</div>}</div>}</div>
 <p className="footnote">Drag elements to move them. Edit text directly; select an element to resize or recolor it. Images are stored in this browser.</p></>}</>;
 }
 // Each spreadsheet stores what you typed; formulas are calculated when cells display.
@@ -688,6 +787,7 @@ function Spreadsheets({ data, update, projectId, sheetId, setSheetId }: {
     sheetId: string;
     setSheetId: (id: string) => void;
 }) { const [attach, setAttach] = useState(projectId); const [name, setName] = useState(''); const [editing, setEditing] = useState(''); const sheet = data.sheets.find(s => s.id === sheetId); const change = (r: number, c: number, val: string) => update(v => ({ ...v, sheets: v.sheets.map(s => s.id === sheetId ? { ...s, cells: { ...s.cells, [`${r}:${c}`]: val } } : s) })); const addSheet = (t: typeof templates[number]) => { const s: Sheet = { id: uid(), name: name.trim() || t.name, projectId: attach, color: t.color, cells: makeCells(t.rows) }; update(v => ({ ...v, sheets: [s, ...v.sheets] })); setSheetId(s.id); setName(''); }; return <>
+<WorkspaceHeader section="PLANNING SHEETS" name="Spreadsheet workspace" detail={`${data.sheets.length} saved sheets · Formulas & CSV export`} />
 <PageTitle eyebrow="ORGANIZE THE NUMBERS" title="Spreadsheets" desc="Flexible, colorful sheets for budgets, shopping lists, and creative planning." action={sheet ? <button className="outline" onClick={() => setSheetId('')}>
 <ArrowLeft size={16}/> All spreadsheets</button> : undefined}/>
 {!sheet ? <>
@@ -702,13 +802,13 @@ function Spreadsheets({ data, update, projectId, sheetId, setSheetId }: {
 <small>Click to create</small>
 </button>)}</div>{data.sheets.length > 0 && <>
 <h3 className="subheading">Your spreadsheets</h3>
-<div className="library-grid">{data.sheets.filter(s => !projectId || s.projectId === projectId).map(s => <button className="library-card" key={s.id} onClick={() => setSheetId(s.id)}>
+<div className="library-grid">{data.sheets.filter(s => !projectId || s.projectId === projectId).map(s => <div className="library-card-wrap" key={s.id}><button className="library-card" onClick={() => setSheetId(s.id)}>
 <span className="library-art" style={{ background: s.color }}>
 <Table2 size={30}/>
 </span>
 <strong>{s.name}</strong>
 <small>Editable sheet</small>
-</button>)}</div></>}</> : <>
+</button><button className="library-delete" type="button" aria-label={`Delete ${s.name}`} title={`Delete ${s.name}`} onClick={() => { if (window.confirm(`Delete spreadsheet "${s.name}"? This cannot be undone.`)) { update(v => ({ ...v, sheets: v.sheets.filter(item => item.id !== s.id) })); if (sheetId === s.id) setSheetId(''); } }}><X size={16}/></button></div>)}</div></>}</> : <>
 <div className="editor-top">
 <div>
 <strong>{sheet.name}</strong>
@@ -760,6 +860,7 @@ function Planner({ data, update, projectId }: {
 <Trash2 size={15}/>
 </button>
 </div>; const y = month.getFullYear(), m = month.getMonth(), offset = new Date(y, m, 1).getDay(), days = new Date(y, m + 1, 0).getDate(); return <>
+<WorkspaceHeader section="CREATIVE PLANNING" name="Project timeline" detail={`${tasks.length} tasks · Board / List / Calendar`} />
 <PageTitle eyebrow="YOUR PLANS, YOUR PACE" title="Planner" desc="A calm place for tasks, deadlines, and everything you need to remember."/>
 <div className="planner-tabs">{([['Board', Columns3], ['List', List], ['Calendar', CalendarDays]] as const).map(([v, Icon]) => <button key={v} className={view === v ? 'selected' : ''} onClick={() => setView(v)}>
 <Icon size={17}/>
@@ -815,7 +916,7 @@ function Planner({ data, update, projectId }: {
 </button>
 </div>
 <div className="calendar-grid">{['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(d => <div className="calendar-day-label" key={d}>{d}</div>)}{Array.from({ length: offset }, (_, i) => <div key={'pad' + i} className="calendar-cell faded"/>)}{Array.from({ length: days }, (_, i) => { const day = `${y}-${String(m + 1).padStart(2, '0')}-${String(i + 1).padStart(2, '0')}`; return <div className="calendar-cell" key={day}>
-<span>{i + 1}</span>{tasks.filter(t => t.date === day).map(t => <button key={t.id} className="calendar-event" style={{ background: taskColor(t, colorMode), color: '#273044' }} title={`${t.title} · ${t.category || 'General'} · ${t.priority}`} onClick={() => change(t.id, { status: t.status === 'Done' ? 'To do' : 'Done' })}>{t.title}</button>)}</div>; })}</div>
+<span>{i + 1}</span>{tasks.filter(t => t.date === day).map(t => <div key={t.id} className="desy-calendar-event-wrap" style={{ background: taskColor(t, colorMode) }}><button className="calendar-event" style={{ background: 'transparent', color: '#273044' }} title={`${t.title} · ${t.category || 'General'} · ${t.priority}`} onClick={() => change(t.id, { status: t.status === 'Done' ? 'To do' : 'Done' })}>{t.title}</button><button className="desy-calendar-delete" aria-label={`Delete ${t.title}`} title={`Delete ${t.title}`} onClick={() => { if(window.confirm(`Delete event "${t.title}"?`)) remove(t.id); }}><X size={12}/></button></div>)}</div>; })}</div>
 </div>}</>; }
 // The layout canvas lets you place, move, and resize furniture and event objects.
 function Layouts({ data, update, projectId, layoutId, setLayoutId }: {
@@ -826,6 +927,13 @@ function Layouts({ data, update, projectId, layoutId, setLayoutId }: {
     setLayoutId: (id: string) => void;
 }) {
     const [attach, setAttach] = useState(projectId), [name, setName] = useState(''), [selected, setSelected] = useState('');
+    const [editedName, setEditedName] = useState('');
+    const [libraryTab, setLibraryTab] = useState<'Furniture' | 'Events' | 'Canvas'>('Furniture');
+    const [elementSearch, setElementSearch] = useState('');
+    const [layoutPanel, setLayoutPanel] = useState<'Layers'|'Properties'>('Layers');
+    const [presenting, setPresenting] = useState(false);
+    const [layoutTool, setLayoutTool] = useState<'select'|'pan'|'measure'>('select');
+    const [layoutGuides, setLayoutGuides] = useState<{x?:number;y?:number}>({});
     const interaction = useRef<{
         id: string;
         mode: 'move' | 'resize';
@@ -838,21 +946,32 @@ function Layouts({ data, update, projectId, layoutId, setLayoutId }: {
     } | null>(null);
     const ref = useRef<HTMLDivElement>(null);
     const doc = data.layouts.find(l => l.id === layoutId);
+    useEffect(() => { setEditedName(doc?.name || ''); }, [layoutId, doc?.name]);
     const change = (fn: (l: LayoutDoc) => LayoutDoc) => update(v => ({ ...v, layouts: v.layouts.map(l => l.id === layoutId ? fn(l) : l) }));
     const defaults: Record<string, [
         number,
         number
     ]> = { Sofa: [180, 78], Bed: [155, 200], Desk: [115, 65], "Round Table": [110, 110], "Rectangular Table": [165, 85], Chair: [58, 62], Plant: [55, 55], "Rectangular Rug": [205, 145], "Round Rug": [145, 145], Lamp: [42, 42], Entryway: [95, 34], "Decor Station": [90, 65], "Gift Table": [120, 70], "Food Station": [150, 80], "Dance Floor": [180, 180], "Photo Booth": [110, 90], "Stage": [180, 95] };
+    const categories: Record<'Furniture' | 'Events', Record<string,string[]>> = {
+      Furniture: { Seating: ['Sofa', 'Chair'], Tables: ['Desk', 'Round Table', 'Rectangular Table'], Room: ['Bed', 'Rectangular Rug', 'Round Rug'], Accessories: ['Plant', 'Lamp'] },
+      Events: { 'Guest experience': ['Entryway', 'Photo Booth'], 'Food & gifts': ['Gift Table', 'Food Station'], 'Production & decor': ['Decor Station', 'Dance Floor', 'Stage'] }
+    };
+    const addPicture = (file: File) => readImage(file, src => change(l => ({ ...l, items: [...l.items, { id: uid(), kind: 'Uploaded Image', src, x: 50, y: 50, w: 175, h: 140, rotation: 0 }] })));
     const add = (kind: string) => change(l => ({ ...l, items: [...l.items, { id: uid(), kind, x: 30 + Math.random() * 25, y: 30 + Math.random() * 25, w: defaults[kind][0], h: defaults[kind][1], rotation: 0 }] }));
     const updateItem = (id: string, patch: Partial<LayoutItem>) => change(l => ({ ...l, items: l.items.map(it => it.id === id ? { ...it, ...patch } : it) }));
-    const begin = (e: React.PointerEvent<HTMLDivElement>, it: LayoutItem, mode: 'move' | 'resize') => { e.preventDefault(); e.stopPropagation(); setSelected(it.id); interaction.current = { id: it.id, mode, sx: e.clientX, sy: e.clientY, ox: it.x, oy: it.y, ow: it.w || 100, oh: it.h || 70 }; e.currentTarget.setPointerCapture(e.pointerId); };
+    const begin = (e: React.PointerEvent<HTMLDivElement>, it: LayoutItem, mode: 'move' | 'resize') => { if (it.locked || layoutTool !== 'select') return; e.preventDefault(); e.stopPropagation(); setSelected(it.id); interaction.current = { id: it.id, mode, sx: e.clientX, sy: e.clientY, ox: it.x, oy: it.y, ow: it.w || 100, oh: it.h || 70 }; e.currentTarget.setPointerCapture(e.pointerId); };
     const pointerMove = (e: React.PointerEvent<HTMLDivElement>) => { const d = interaction.current, r = ref.current?.getBoundingClientRect(); if (!d || !r)
         return; const dx = e.clientX - d.sx, dy = e.clientY - d.sy; if (d.mode === 'resize')
         updateItem(d.id, { w: Math.max(30, Math.round(d.ow + dx / r.width * (doc?.roomWidth || 20) * 35)), h: Math.max(30, Math.round(d.oh + dy / r.height * (doc?.roomHeight || 15) * 35)) });
-    else
-        updateItem(d.id, { x: Math.max(0, Math.min(100, (doc?.snap ? Math.round((d.ox + dx / r.width * 100) * (doc.roomWidth || 20) * 2 / 100) * 100 / ((doc.roomWidth || 20) * 2) : d.ox + dx / r.width * 100))), y: Math.max(0, Math.min(100, (doc?.snap ? Math.round((d.oy + dy / r.height * 100) * (doc.roomHeight || 15) * 2 / 100) * 100 / ((doc.roomHeight || 15) * 2) : d.oy + dy / r.height * 100))) }); };
+    else {
+        const px = d.ox + dx / r.width * 100, py = d.oy + dy / r.height * 100;
+        const others = (doc?.items || []).filter(i => i.id !== d.id && !i.hidden);
+        const nearX = others.find(i => Math.abs(i.x-px)<1.5); const nearY = others.find(i => Math.abs(i.y-py)<1.5);
+        setLayoutGuides({x:nearX?.x,y:nearY?.y});
+        updateItem(d.id, { x: Math.max(0, Math.min(100, (doc?.snap ? Math.round((d.ox + dx / r.width * 100) * (doc.roomWidth || 20) * 2 / 100) * 100 / ((doc.roomWidth || 20) * 2) : d.ox + dx / r.width * 100))), y: Math.max(0, Math.min(100, (doc?.snap ? Math.round((d.oy + dy / r.height * 100) * (doc.roomHeight || 15) * 2 / 100) * 100 / ((doc.roomHeight || 15) * 2) : d.oy + dy / r.height * 100))) }); } };
     const active = doc?.items.find(i => i.id === selected);
     return <>
+<WorkspaceHeader section="SPATIAL DESIGN" name={doc?.name || "Layout library"} detail={doc ? `${doc.items.length} objects · Precision workspace` : `${data.layouts.length} saved layouts`} />
 <PageTitle eyebrow="IMAGINE YOUR SPACE" title="Layout Studio" desc="Upload a floor plan or photo, then arrange and resize furniture from above." action={doc ? <button className="outline" onClick={() => { setLayoutId(''); setSelected(''); }}>
 <ArrowLeft size={16}/> All layouts</button> : undefined}/>
 {!doc ? <>
@@ -862,49 +981,52 @@ function Layouts({ data, update, projectId, layoutId, setLayoutId }: {
 <button className="primary" onClick={() => { const l: LayoutDoc = { id: uid(), name: name.trim() || 'Untitled layout', projectId: attach, items: [], opacity: 0.5, roomWidth: 20, roomHeight: 15, snap: true }; update(v => ({ ...v, layouts: [l, ...v.layouts] })); setLayoutId(l.id); setName(''); }}>
 <Plus size={17}/> New layout</button>
 </div>
-<div className="library-grid">{data.layouts.filter(l => !projectId || l.projectId === projectId).map(l => <button className="library-card" key={l.id} onClick={() => setLayoutId(l.id)}>
+<div className="library-grid">{data.layouts.filter(l => !projectId || l.projectId === projectId).map(l => <div className="library-card-wrap" key={l.id}><button className="library-card" onClick={() => setLayoutId(l.id)}>
 <span className="library-art" style={{ background: pastel[2] }}>
 <Ruler size={30}/>
 </span>
 <strong>{l.name}</strong>
 <small>{l.items.length} objects</small>
-</button>)}</div>{data.layouts.length === 0 && <div className="empty-message">Create your first layout to start planning a space.</div>}</> : <>
-<div className="editor-top">
-<div>
-<strong>{doc.name}</strong>
-<small>Visual floor planner · Room and furniture dimensions in feet</small>
+</button><button className="library-delete" type="button" aria-label={`Delete ${l.name}`} title={`Delete ${l.name}`} onClick={() => { if (window.confirm(`Delete layout "${l.name}"? This cannot be undone.`)) { update(v => ({ ...v, layouts: v.layouts.filter(item => item.id !== l.id) })); if (layoutId === l.id) setLayoutId(''); } }}><X size={16}/></button></div>)}</div>{data.layouts.length === 0 && <div className="empty-message">Create your first layout to start planning a space.</div>}</> : <>
+<div className="editor-top layout-title-editor">
+<div className="layout-title-fields">
+<label htmlFor="layout-rename">LAYOUT NAME</label>
+<div className="layout-name-row"><input id="layout-rename" className="field" aria-label="Layout name" value={editedName} onChange={e => setEditedName(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') { const next = editedName.trim(); if (next) change(l => ({ ...l, name: next })); } }}/><button className="primary" disabled={!editedName.trim() || editedName.trim() === doc.name} onClick={() => change(l => ({ ...l, name: editedName.trim() }))}><Check size={16}/> Save name</button></div>
+<small>Rename this layout without leaving the editor.</small>
 </div>
-<button className="outline danger" onClick={() => { if (confirm('Delete layout?')) {
-        update(v => ({ ...v, layouts: v.layouts.filter(l => l.id !== doc.id) }));
-        setLayoutId('');
-    } }}>
-<Trash2 size={16}/> Delete</button>
+<button className="outline danger" onClick={() => { if (confirm('Delete layout?')) { update(v => ({ ...v, layouts: v.layouts.filter(l => l.id !== doc.id) })); setLayoutId(''); } }}><Trash2 size={16}/> Delete</button>
 </div>
-<div className="layout-workspace">
+<div className="layout-quickbar">
+<label className="outline layout-quick-upload"><Upload size={16}/> Add picture<input type="file" accept="image/*" hidden onChange={e => { const f = e.target.files?.[0]; if (f) addPicture(f); e.target.value = ''; }}/></label>
+<label className="layout-color-control">Canvas color <input type="color" aria-label="Canvas background color" value={doc.backgroundColor || '#fdfcff'} onChange={e => change(l => ({ ...l, backgroundColor: e.target.value }))}/></label>
+<label className="outline layout-quick-upload"><Images size={16}/> Background image<input type="file" accept="image/*" hidden onChange={e => { const f = e.target.files?.[0]; if (f) readImage(f, src => change(l => ({ ...l, background: src }))); e.target.value = ''; }}/></label>
+{doc.background && <button className="outline" onClick={() => change(l => ({ ...l, background: undefined }))}>Clear background image</button>}
+</div>
+<div className="desy-layout-toolbar"><div className="desy-tool-set">{(['select','pan','measure'] as const).map(t => <button key={t} title={t === 'select' ? 'Select objects' : t === 'pan' ? 'Pan mode (view only)' : 'Measure using the room dimensions'} className={layoutTool === t ? 'active' : ''} onClick={() => setLayoutTool(t)}>{t === 'select' ? <><MousePointer2 size={15}/> Select</> : t === 'pan' ? <><Hand size={15}/> Pan</> : <><Ruler size={15}/> Measure</>}</button>)}</div><div className="desy-tool-set"><button onClick={() => change(l => ({...l,snap:!l.snap}))}>{doc.snap !== false ? '✓' : '○'} Snap</button><button onClick={() => setPresenting(true)}>▣ Present</button><button onClick={() => exportLayoutPNG(doc)}>↓ PNG</button><button onClick={() => { setPresenting(true); setTimeout(() => window.print(),150); }}>↓ Print / PDF</button></div></div>
+<div className="layout-workspace desy-layout-3col">
 <div className="layout-sidebar">
-<h3>Canvas background</h3>
-<label className="upload-box">
-<Upload size={23}/>
-<span>Upload photo or floor plan</span>
-<input type="file" accept="image/*" hidden onChange={e => { const f = e.target.files?.[0]; if (f)
-        readImage(f, src => change(l => ({ ...l, background: src, photo: src }))); e.target.value = ''; }}/>
-</label>{doc.background && <>
-<label className="layout-control">Background opacity <input type="range" min="0" max="1" step="0.05" value={doc.opacity ?? 0.5} onChange={e => change(l => ({ ...l, opacity: +e.target.value }))}/>
-</label>
-<button className="outline" onClick={() => change(l => ({ ...l, background: undefined }))}>Remove background</button></>}{doc.photo && <img className="room-reference" src={doc.photo} alt="Room reference"/>}<h3>Room dimensions</h3>
-<div className="room-dimensions">
-<label>Width (ft)<input type="number" min="4" max="100" step="0.5" value={doc.roomWidth || 20} onChange={e => change(l => ({ ...l, roomWidth: Math.max(4, +e.target.value || 4) }))}/>
-</label>
-<label>Length (ft)<input type="number" min="4" max="100" step="0.5" value={doc.roomHeight || 15} onChange={e => change(l => ({ ...l, roomHeight: Math.max(4, +e.target.value || 4) }))}/>
-</label>
+<div className="layout-library-tabs" role="tablist" aria-label="Layout editor panels">
+{(['Furniture','Events','Canvas'] as const).map(tab => <button key={tab} role="tab" aria-selected={libraryTab === tab} className={libraryTab === tab ? 'active' : ''} onClick={() => setLibraryTab(tab)}>{tab}</button>)}
 </div>
-<label className="snap-toggle">
-<input type="checkbox" checked={doc.snap !== false} onChange={e => change(l => ({ ...l, snap: e.target.checked }))}/>
-<Grid3X3 size={15}/> Snap to 6-inch grid</label>
-<h3>Furniture & event elements</h3>
-<p className="footnote">Add rugs, tables, an entryway, decor, and event zones.</p>{Object.keys(defaults).map(k => <button className="object-option" key={k} onClick={() => add(k)}>
-<Plus size={16}/>
-{k}</button>)}{active && <div className="object-inspector">
+{libraryTab !== 'Canvas' ? <>
+<h3>{libraryTab} library</h3>
+<input className="field layout-element-search" aria-label="Search elements" placeholder="Search elements…" value={elementSearch} onChange={e => setElementSearch(e.target.value)}/>
+{Object.entries(categories[libraryTab]).map(([category, elements]) => {
+const matches = elements.filter(kind => kind.toLowerCase().includes(elementSearch.toLowerCase()));
+return matches.length ? <div className="layout-element-group" key={category}><h4>{category}</h4><div className="layout-element-grid">{matches.map(kind => <button className="object-option" key={kind} onClick={() => add(kind)} title={`Add ${kind}`}><Plus size={15}/><span>{kind}</span></button>)}</div></div> : null;
+})}
+<p className="footnote">Click an element to add it. Drag it on the canvas to reposition.</p>
+</> : <>
+<h3>Canvas settings</h3>
+<label className="layout-control">Background color<input type="color" value={doc.backgroundColor || '#fdfcff'} onChange={e => change(l => ({ ...l, backgroundColor: e.target.value }))}/></label>
+<label className="upload-box"><Upload size={20}/><span>Upload background image</span><input type="file" accept="image/*" hidden onChange={e => { const f = e.target.files?.[0]; if (f) readImage(f, src => change(l => ({ ...l, background: src }))); e.target.value = ''; }}/></label>
+{doc.background && <><label className="layout-control">Image opacity<input type="range" min="0" max="1" step="0.05" value={doc.opacity ?? 0.5} onChange={e => change(l => ({ ...l, opacity: +e.target.value }))}/></label><button className="outline" onClick={() => change(l => ({ ...l, background: undefined }))}>Remove background image</button></>}
+<h3>Room dimensions</h3><div className="room-dimensions">
+<label>Width (ft)<input type="number" min="4" max="100" step="0.5" value={doc.roomWidth || 20} onChange={e => change(l => ({ ...l, roomWidth: Math.max(4, +e.target.value || 4) }))}/></label>
+<label>Length (ft)<input type="number" min="4" max="100" step="0.5" value={doc.roomHeight || 15} onChange={e => change(l => ({ ...l, roomHeight: Math.max(4, +e.target.value || 4) }))}/></label></div>
+<label className="snap-toggle"><input type="checkbox" checked={doc.snap !== false} onChange={e => change(l => ({ ...l, snap: e.target.checked }))}/><Grid3X3 size={15}/> Snap to 6-inch grid</label>
+</>}
+{active && <div className="object-inspector">
 <h3>Selected: {active.kind}</h3>
 <label>Width (ft)<input type="number" min="0.5" step="0.5" value={+((active.w || 100) / 35).toFixed(2)} onChange={e => updateItem(active.id, { w: Math.max(17.5, +e.target.value * 35) })}/>
 </label>
@@ -914,14 +1036,15 @@ function Layouts({ data, update, projectId, layoutId, setLayoutId }: {
 </label>
 <button className="outline" onClick={() => change(l => ({ ...l, items: l.items.filter(x => x.id !== active.id) }))}>Remove object</button>
 </div>}</div>
-<div className="layout-stage" style={{ aspectRatio: `${doc.roomWidth || 20} / ${doc.roomHeight || 15}`, height: "auto", minHeight: 320 }} ref={ref} onPointerMove={pointerMove} onPointerUp={() => interaction.current = null} onPointerCancel={() => interaction.current = null} onClick={() => setSelected('')}>
-<span className="layout-watermark">YOUR SPACE</span>{doc.background && <img className="layout-background" src={doc.background} alt="Layout background" draggable={false} style={{ opacity: doc.opacity ?? 0.5 }}/>}{doc.items.map(it => <div className={'furniture-object ' + (selected === it.id ? 'is-selected' : '')} key={it.id} style={{ left: it.x + '%', top: it.y + '%', width: `${((it.w || 100) / 35) / (doc.roomWidth || 20) * 100}%`, height: `${((it.h || 70) / 35) / (doc.roomHeight || 15) * 100}%`, transform: `translate(-50%,-50%) rotate(${it.rotation || 0}deg)` }} onPointerDown={e => begin(e, it, 'move')} onClick={e => { e.stopPropagation(); setSelected(it.id); }}>
-<FurnitureShape kind={it.kind}/>
+<div className="layout-stage" style={{ backgroundColor: doc.backgroundColor || '#fdfcff', aspectRatio: `${doc.roomWidth || 20} / ${doc.roomHeight || 15}`, height: "auto", minHeight: 320 }} ref={ref} onPointerMove={pointerMove} onPointerUp={() => { interaction.current = null; setLayoutGuides({}); }} onPointerCancel={() => { interaction.current = null; setLayoutGuides({}); }} onClick={() => setSelected('')}>
+<span className="layout-watermark">YOUR SPACE</span>{doc.background && <img className="layout-background" src={doc.background} alt="Layout background" draggable={false} style={{ opacity: doc.opacity ?? 0.5 }}/>}{layoutGuides.x !== undefined && <div className="layout-alignment-guide vertical" style={{left:layoutGuides.x+'%'}}/>}{layoutGuides.y !== undefined && <div className="layout-alignment-guide horizontal" style={{top:layoutGuides.y+'%'}}/>}{doc.items.filter(it => !it.hidden).map(it => <div className={'furniture-object ' + (selected === it.id ? 'is-selected' : '')} key={it.id} style={{ left: it.x + '%', top: it.y + '%', width: `${((it.w || 100) / 35) / (doc.roomWidth || 20) * 100}%`, height: `${((it.h || 70) / 35) / (doc.roomHeight || 15) * 100}%`, transform: `translate(-50%,-50%) rotate(${it.rotation || 0}deg)` }} onPointerDown={e => begin(e, it, 'move')} onClick={e => { e.stopPropagation(); setSelected(it.id); }}>
+{it.kind === 'Uploaded Image' && it.src ? <img className="layout-uploaded-picture" src={it.src} alt="Uploaded layout picture" draggable={false}/> : <FurnitureShape kind={it.kind}/>}
 <span className="furniture-label">{it.kind}</span>
 <button className="furniture-remove" onPointerDown={e => e.stopPropagation()} onClick={e => { e.stopPropagation(); change(l => ({ ...l, items: l.items.filter(x => x.id !== it.id) })); }}>
 <X size={12}/>
-</button>{selected === it.id && <div className="furniture-resize" title="Drag to resize" onPointerDown={e => begin(e, it, 'resize')}/>}</div>)}</div>
-</div>
+</button>{selected === it.id && !it.locked && <div className="furniture-resize" title="Drag to resize" onPointerDown={e => begin(e, it, 'resize')}/>}</div>)}</div>
+<div className="desy-layers-panel desy-layout-inspector"><div className="desy-panel-tabs"><button className={layoutPanel === 'Layers' ? 'active' : ''} onClick={() => setLayoutPanel('Layers')}>Layers</button><button className={layoutPanel === 'Properties' ? 'active' : ''} onClick={() => setLayoutPanel('Properties')}>Properties</button></div>{layoutPanel === 'Layers' ? <><p className="desy-panel-hint">Select, reorder, lock, or hide objects.</p>{[...doc.items].reverse().map(it => <div className={'desy-layer-row' + (selected === it.id ? ' active' : '')} key={it.id}><button className="desy-layer-name" onClick={() => setSelected(it.id)}><span>{it.kind}</span></button><button title={it.hidden?'Show':'Hide'} onClick={() => updateItem(it.id,{hidden:!it.hidden})}>{it.hidden?<EyeOff size={14}/>:<Eye size={14}/>}</button><button title={it.locked?'Unlock':'Lock'} onClick={() => updateItem(it.id,{locked:!it.locked})}>{it.locked?<Lock size={14}/>:<Unlock size={14}/>}</button><button title="Move up" onClick={() => change(l => ({...l,items:reorder(l.items,it.id,1)}))}><ChevronUp size={14}/></button><button title="Move down" onClick={() => change(l => ({...l,items:reorder(l.items,it.id,-1)}))}><ChevronDown size={14}/></button></div>)}</> : active ? <div className="desy-properties"><h3>{active.kind}</h3>{(['x','y','w','h','rotation'] as const).map(prop => <label key={prop}>{prop.toUpperCase()}<input type="number" step={prop==='x'||prop==='y'?0.5:1} value={Number(active[prop]??0)} onChange={e => updateItem(active.id,{[prop]:Number(e.target.value)})}/></label>)}<button className="outline" onClick={() => change(l => ({...l,items:[...l.items,{...active,id:uid(),x:active.x+4,y:active.y+4,locked:false}]}))}>Duplicate</button><button className="outline" onClick={() => {change(l => ({...l,items:l.items.filter(i => i.id!==active.id)}));setSelected('');}}>Delete</button></div> : <p className="desy-panel-hint">Select an object to edit its position, size, and rotation.</p>}</div>
+</div>{presenting && <div className="desy-presentation" role="dialog" aria-modal="true" aria-label="Layout presentation"><div className="desy-present-bar"><strong>{doc.name}</strong><button onClick={() => setPresenting(false)}><X size={15}/> Close presentation</button></div><div className="desy-present-canvas" style={{aspectRatio:`${doc.roomWidth||20}/${doc.roomHeight||15}`,backgroundColor:doc.backgroundColor||'#fff'}}>{doc.background && <img src={doc.background} className="layout-background" style={{opacity:doc.opacity??0.5}} alt=""/>}{doc.items.filter(it=>!it.hidden).map(it=><div key={it.id} className="furniture-object" style={{left:it.x+'%',top:it.y+'%',width:`${((it.w||100)/35)/(doc.roomWidth||20)*100}%`,height:`${((it.h||70)/35)/(doc.roomHeight||15)*100}%`,transform:`translate(-50%,-50%) rotate(${it.rotation||0}deg)`}}>{it.kind==='Uploaded Image'&&it.src?<img className="layout-uploaded-picture" src={it.src} alt=""/>:<FurnitureShape kind={it.kind}/>}</div>)}</div></div>}
 <p className="footnote">Drag to move; select an object and drag its lower-right handle to resize. Furniture is shown from above. Room and furniture measurements use a proportional feet-based scale. Resize handles can also adjust furniture visually.</p></>}</>;
 }
 function FurnitureShape({ kind }: {

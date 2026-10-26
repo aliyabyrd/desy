@@ -35,3 +35,11 @@ This is a functioning **prototype**, not a complete replacement for Figma, Miro,
 - Spreadsheet formulas support arithmetic, cell references (e.g. `=C2*D2`), `SUM`, `AVERAGE`, `AVG`, `MIN`, `MAX`, and `COUNT` over ranges.
 
 Data continues to be saved locally under `desy-v2`.
+
+## Professional editor update
+- Moodboards and Layout Studio include layer lists with selection, visibility, locking and reordering.
+- Layout Studio has a precision inspector, snap toggle, basic object alignment guides, presentation view, PNG export and browser Print / Save as PDF.
+- A subtle lavender cursor follows mouse pointers (disabled on touch devices).
+- The Pan tool is currently a non-editing viewing mode, and Measure shows room measurements; neither is yet a full pan/measurement interaction.
+- Images are stored in browser localStorage, so large uploads may exceed browser storage limits.
+- To test: `npm install`, `npm run build`, `npm run dev`.
